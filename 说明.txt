@@ -1,5 +1,0 @@
-打开程序后直接Main.exe 打开浏览器即可
-
-程序默认为支持chrome，如果点击打开浏览器没有反应的话请修改Config.ini的路径
-
-用户端只需要下载ClientBin.rar
