@@ -1,0 +1,19 @@
+{
+  "name": "usaproxy",
+  "version": "0.0.0",
+  "description": "",
+  "main": "httpProxy.js",
+  "dependencies": {
+    "http-proxy": "^1.2.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@heroku.com:usaproxy.git"
+  },
+  "author": "",
+  "license": "ISC"
+}

@@ -1,0 +1,45 @@
+#define AFD_RECV 0x12017     //定义接受标识
+#define AFD_SEND 0x1201f     //定义发送标识
+#define STATUS_SUCCESS 0x00000000
+typedef struct AFD_WSABUF{
+	UINT  len;
+	PCHAR  buf;
+}AFD_WSABUF, *PAFD_WSABUF;
+
+typedef struct AFD_INFO {
+	PAFD_WSABUF  BufferArray;
+	ULONG  BufferCount;
+	ULONG  AfdFlags;
+	ULONG  TdiFlags;
+} AFD_INFO, *PAFD_INFO;
+typedef LONG NTSTATUS;
+
+typedef struct _IO_STATUS_BLOCK {
+	union {
+		NTSTATUS Status;
+		PVOID    Pointer;
+	};
+	ULONG_PTR Information;
+} IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
+
+#define NT_SUCCESS(Status) ((NTSTATUS)(Status) >= 0)
+struct{
+	std::string Host;
+    int Port;
+	bool hiddenIp;
+	bool off;
+	char Ip[50];
+	bool usessl;
+	std::string sslHost;
+	int sslPort;
+	char sslIp[50];
+}Config;
+
+///defline fuc
+bool Initialize();
+void SuperHookDeviceIoControl();
+int WINAPI myconnect(int sockfd, struct sockaddr * serv_addr, int addrlen);
+NTSTATUS WINAPI NewNtDeviceIoControlFile(HANDLE FileHandle, HANDLE Event OPTIONAL, PVOID ApcRoutine OPTIONAL, PVOID ApcContext OPTIONAL, PVOID IoStatusBlock, ULONG IoControlCode, PVOID InputBuffer OPTIONAL, ULONG InputBufferLength, PVOID OutputBuffer OPTIONAL, ULONG OutputBufferLength);
+static NTSTATUS(WINAPI* pNtDeviceIoControl)(HANDLE FileHandle, HANDLE Event OPTIONAL, PVOID ApcRoutine OPTIONAL, PVOID ApcContext OPTIONAL, PVOID IoStatusBlock, ULONG IoControlCode, PVOID InputBuffer OPTIONAL, ULONG InputBufferLength, PVOID OutputBuffer OPTIONAL, ULONG OutputBufferLength);
+static  int(WINAPI * OLD_connect)(SOCKET sockfd, const sockaddr * serv_addr, int addrlen) = connect;
+void OutputDebugPrintf(const char * strOutputString, ...);

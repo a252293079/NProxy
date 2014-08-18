@@ -1,0 +1,316 @@
+// dllmain.cpp : 定义 DLL 应用程序的入口点。
+#include "stdafx.h"
+#include "dllmain.h"
+
+
+
+char szBuffer[512] = { 0 };
+
+// 监视程序和DLL共用的结构体
+#pragma pack (push ,1) // 保证下面的结构体采用BYTE对齐（必须）
+typedef struct INJECT_CODE
+{
+	BYTE      int_PUSHAD;         // pushad        0x60       
+	BYTE      int_PUSH;             // push &szDLL     0x68
+	DWORD push_Value;           //            &szDLL = "ApiSpy.dll"的path
+	BYTE      int_MOVEAX;              //  move eax &LoadLibrary  0xB8
+	DWORD eax_Value;             //     &LoadLibrary
+	WORD    call_eax;         //     call eax    0xD0FF(FF D0) (LoadLibrary("ApiSpy.dll");
+	BYTE      jmp_MOVEAX;             //     move eax &ReplaceOldCode  0xB8       
+	DWORD jmp_Value;             //     JMP的参数
+	WORD    jmp_eax;        //     jmp eax   0xE0FF(FF E0) jmp ReplaceOldCode;
+	char szDLL[MAX_PATH]; //  "ApiSpy.dll"的FullPath
+}INJECT_LOADLIBRARY_CODE, *LPINJECT_CODE;
+#pragma pack (pop , 1)
+
+typedef struct
+{
+	LPBYTE  lpEntryPoint;   // 目标进程的入口地址
+	BYTE      oldcode[sizeof(INJECT_CODE)];        // 目标进程的代码保存
+}SPY_MEM_SHARE, *LPSPY_MEM_SHARE;
+
+typedef struct
+{
+	DWORD lpEntryPoint;
+	DWORD OldAddr;
+	DWORD OldCode[4];
+}JMP_CODE, *LPJMP_CODE;
+static JMP_CODE _lpCode;
+
+
+void Start(){
+	MessageBox(NULL, "aaa", NULL, MB_OK);
+	HANDLE hMap;
+	LPSPY_MEM_SHARE lpMem;
+	DWORD dwSize;
+	// 取得FileMapping的句柄  
+	hMap = OpenFileMapping(FILE_MAP_ALL_ACCESS, 0, "MyDllMapView");
+	if (hMap)
+	{
+		lpMem = (LPSPY_MEM_SHARE)MapViewOfFile(hMap, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+		if (lpMem)
+		{
+			_lpCode.lpEntryPoint = (DWORD)lpMem->lpEntryPoint;
+			// 恢复目标进程的入口代码  
+			WriteProcessMemory(GetCurrentProcess(), lpMem->lpEntryPoint, lpMem->oldcode, sizeof(INJECT_CODE), &dwSize);
+			__asm{
+				popad
+					jmp _lpCode.lpEntryPoint
+			}
+
+			UnmapViewOfFile(lpMem);
+
+		}
+		CloseHandle(hMap);
+	}
+}
+
+BOOL APIENTRY DllMain(HMODULE hModule,DWORD  ul_reason_for_call,LPVOID lpReserved)
+{
+	switch (ul_reason_for_call)
+	{
+	case DLL_PROCESS_ATTACH:{
+
+		Start();
+		/*
+		return TRUE;
+	
+		if (!Initialize())return FALSE;
+	
+		sprintf_s(szBuffer, "dbg:connect:0x%X", OLD_connect);
+		SuperHookDeviceIoControl();   //挂钩内核
+
+		OutputDebugString(szBuffer);
+		OutputDebugString(TEXT("dbg:start hook.."));
+
+		DetourTransactionBegin();
+		DetourUpdateThread(GetCurrentThread());
+		DetourAttach(&(PVOID&)OLD_connect, myconnect);
+		DetourAttach(&(PVOID&)pNtDeviceIoControl, NewNtDeviceIoControlFile);
+		DetourTransactionCommit();
+		OutputDebugString(TEXT("dbg:Loading.."));
+	*/
+		break;
+	}
+	case DLL_THREAD_ATTACH:
+	case DLL_THREAD_DETACH:
+	case DLL_PROCESS_DETACH:
+		break;
+	}
+	return TRUE;
+}
+
+
+bool Initialize(){
+	WSADATA wsadata;
+	WSAStartup(MAKEWORD(2, 2), &wsadata);
+	char szPath[MAX_PATH];
+	GetModuleFileName(GetModuleHandle(NULL), szPath, MAX_PATH);
+	strcpy(szPath, strlwr(szPath));
+	if (strstr(szPath, "chrome.exe") == NULL){
+		//	OutputDebugString(szPath);
+		return FALSE;
+	}
+	boost::property_tree::ptree m_pt;
+	boost::property_tree::ini_parser::read_ini("C:\\Config.ini", m_pt);
+	Config.Host = m_pt.get<string>("public.Host");
+	if (Config.Host.empty()){ return false; }
+	Config.Port = m_pt.get<int>("public.Port");
+	Config.hiddenIp = m_pt.get<bool>("public.hiddenIp");
+	Config.off = m_pt.get<bool>("public.off");
+	Config.usessl = m_pt.get<bool>("public.usessl");
+	if (Config.usessl){
+		Config.sslHost = m_pt.get<string>("public.sslHost");
+		HOSTENT *pHostent;
+		if ((pHostent = gethostbyname(Config.sslHost.c_str())) != NULL){
+			strcpy(Config.sslIp, inet_ntoa(*((struct in_addr *)pHostent->h_addr)));
+		}
+		if (strcmp(Config.sslIp, "") == 0){
+			MessageBox(NULL, "获取ssl IP错误，请检查配置文件是否存在,如果不需要ssl功能请在控制台关闭！", NULL, MB_OK);
+			ExitProcess(0);
+			return false;
+		}
+		Config.sslPort = m_pt.get<int>("public.sslPort");
+	}
+	if (Config.off){  //是否关闭代理
+		return false;
+	}
+	//	OutputDebugString(Config.Host.c_str());
+
+
+	HOSTENT *pHostent;
+	if ((pHostent = gethostbyname(Config.Host.c_str())) != NULL){
+		strcpy(Config.Ip, inet_ntoa(*((struct in_addr *)pHostent->h_addr)));
+	}
+	if (strcmp(Config.Ip, "") == 0){
+		MessageBox(NULL, "获取IP错误，请检查配置文件是否存在", NULL, MB_OK);
+		ExitProcess(0);
+		return false;
+	}
+	WSACleanup();
+	//	OutputDebugString(Config.Ip);
+	return true;
+}
+string fileterhttp(string sbuf){
+	boost::cmatch mat;
+	boost::regex reg("Host: ([^\r\n]+)\r\n");
+	if (boost::regex_search(sbuf.c_str(), mat, reg)){
+		string sok = (mat[0]);
+		string Host = mat[1];
+		if (Config.hiddenIp == true){
+			boost::replace_first(sbuf, sok, "Host: " + Config.Host + "\r\ngHost: " + mat[1] + "\r\nhiddenIp: true\r\n");
+		}
+		else{
+			boost::replace_first(sbuf, sok, "Host: " + Config.Host + "\r\ngHost: " + mat[1] + "\r\n");
+		}
+	}
+	return sbuf;
+}
+string fileterhttps(string sbuf){
+
+	return sbuf;
+}
+NTSTATUS WINAPI NewNtDeviceIoControlFile(HANDLE FileHandle, HANDLE Event OPTIONAL, PVOID ApcRoutine OPTIONAL, PVOID ApcContext OPTIONAL, PVOID IoStatusBlock, ULONG IoControlCode, PVOID InputBuffer OPTIONAL, ULONG InputBufferLength, PVOID OutputBuffer OPTIONAL, ULONG OutputBufferLength)
+{
+	if (IoControlCode != AFD_SEND)
+	{
+		return pNtDeviceIoControl(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, IoControlCode, InputBuffer, InputBufferLength, OutputBuffer, OutputBufferLength);
+	}
+	string text = "";
+	PAFD_INFO AfdInfo = NULL;
+	char * Buffer = NULL;
+	ULONG Len = NULL;
+	AfdInfo = (PAFD_INFO)InputBuffer;
+	Len = AfdInfo->BufferArray->len;
+	text = AfdInfo->BufferArray->buf;
+	if (text.find("1.1") == -1){
+		OutputDebugString("fileter https!");
+		NTSTATUS Ntstatus = pNtDeviceIoControl(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, IoControlCode, InputBuffer, InputBufferLength, OutputBuffer, OutputBufferLength);
+		return Ntstatus;
+	}
+	else{
+		text = fileterhttp(text);
+		AfdInfo->BufferArray->len = text.length();
+		AfdInfo->BufferArray->buf = (char*)text.c_str();
+		NTSTATUS Ntstatus = pNtDeviceIoControl(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, IoControlCode, InputBuffer, InputBufferLength, OutputBuffer, OutputBufferLength);
+		PIO_STATUS_BLOCK io_status_block = (PIO_STATUS_BLOCK)IoStatusBlock;
+		io_status_block->Status = STATUS_SUCCESS;
+		io_status_block->Information = Len;
+		return Ntstatus;
+	}
+}
+void OutputDebugPrintf(const char * strOutputString, ...)
+{
+	char strBuffer[4096] = { 0 };
+	va_list vlArgs;
+	va_start(vlArgs, strOutputString);
+	_vsnprintf(strBuffer, sizeof(strBuffer)-1, strOutputString, vlArgs);
+	//vsprintf(strBuffer,strOutputString,vlArgs);
+	va_end(vlArgs);
+	OutputDebugString(strBuffer);
+}
+int WINAPI myconnect(int sockfd, struct sockaddr * serv_addr, int addrlen){
+	struct sockaddr_in *paddr = (struct sockaddr_in *)serv_addr;
+	int nPort = ntohs(paddr->sin_port);
+	string sIp;
+	if (nPort == 443){
+		if (Config.usessl == true){
+			sIp = Config.sslIp;
+			nPort = Config.sslPort;
+		}
+		else{
+			sIp = inet_ntoa(paddr->sin_addr);
+		}
+	}
+	else{
+		sIp = Config.Ip;
+		nPort = Config.Port;
+	}
+	OutputDebugPrintf("dbg:%d\n", nPort);
+	paddr->sin_addr.S_un.S_addr = inet_addr(sIp.c_str());
+	paddr->sin_port = htons(nPort);
+	return OLD_connect(sockfd, (struct sockaddr*)paddr, sizeof(sockaddr_in));
+}
+void SuperHookDeviceIoControl()
+{
+	//得到ws2_32.dll的模块基址
+	HMODULE hMod = LoadLibrary("mswsock.dll");
+	if (hMod == 0)
+	{
+		return;
+	}
+
+	//得到DOS头
+
+	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)hMod;
+
+	//如果DOS头无效
+	if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+	{
+		return;
+	}
+
+	//得到NT头
+
+	PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)((ULONG)hMod + pDosHeader->e_lfanew);
+
+	//如果NT头无效
+	if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE)
+	{
+		return;
+	}
+
+	//检查输入表数据目录是否存在
+	if (pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress == 0 ||
+		pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size == 0)
+	{
+		return;
+	}
+	//得到输入表描述指针
+
+	PIMAGE_IMPORT_DESCRIPTOR ImportDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)((ULONG)hMod + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+
+	PIMAGE_THUNK_DATA ThunkData;
+
+	//检查每个输入项
+	while (ImportDescriptor->FirstThunk)
+	{
+		//检查输入表项是否为ntdll.dll
+
+		char* dllname = (char*)((ULONG)hMod + ImportDescriptor->Name);
+
+		//如果不是，则跳到下一个处理
+
+		if (::strcmp(dllname, "ntdll.dll") != 0)
+		{
+			ImportDescriptor++;
+			continue;
+		}
+
+		ThunkData = (PIMAGE_THUNK_DATA)((ULONG)hMod + ImportDescriptor->OriginalFirstThunk);
+
+		int no = 1;
+		while (ThunkData->u1.Function)
+		{
+			//检查函数是否为NtDeviceIoControlFile
+
+			char* functionname = (char*)((ULONG)hMod + ThunkData->u1.AddressOfData + 2);
+			if (strcmp(functionname, "NtDeviceIoControlFile") == 0)
+			{
+				//
+				//如果是，那么记录原始函数地址
+				//HOOK我们的函数地址
+				//
+				PDWORD lpAddr = (DWORD *)((ULONG)hMod + (DWORD)ImportDescriptor->FirstThunk) + (no - 1);
+				pNtDeviceIoControl = (NTSTATUS(__stdcall *)(HANDLE, HANDLE, PVOID, PVOID, PVOID, ULONG, PVOID, ULONG, PVOID, ULONG)) (PVOID)(*(ULONG*)lpAddr);
+				return;
+
+			}
+
+			no++;
+			ThunkData++;
+		}
+		ImportDescriptor++;
+	}
+	return;
+}

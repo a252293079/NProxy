@@ -1,0 +1,22 @@
+{
+    "name" : "HttpsProxyServcie",
+    "main" : "Index.html",
+    "description" : "显示当前系统的详细信息",
+    "window" : {
+        "toolbar": false,
+        "icon" : "icon.png",
+        "frame": true,
+        "title" : "https Service",
+        "position" : "center",
+        "width" : 500,
+        "height" : 280
+    },  "dependencies": {
+    "http-proxy": "^1.2.0"
+    ,"ini":"*"
+    },
+    "contributors" : [{
+        "name": "Alien",
+        "email": "xianliezhao@foxmail.com",
+        "web": "http://www.baidufe.com"
+    }]
+}
